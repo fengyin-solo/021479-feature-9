@@ -204,6 +204,16 @@
             <span class="detail-label">任务描述</span>
             <span class="detail-value">{{ selectedTask.subtitle }}</span>
           </div>
+          <div v-if="selectedTask.type === 'order' && selectedTask.extra?.items?.length" class="detail-orders">
+            <span class="detail-label">商品明细</span>
+            <div class="detail-order-items">
+              <div v-for="item in selectedTask.extra.items" :key="item.id" class="detail-order-item">
+                <span>{{ item.icon }}</span>
+                <span class="doi-name">{{ item.name }}</span>
+                <span class="doi-qty">x{{ item.qty }}</span>
+              </div>
+            </div>
+          </div>
           <div v-if="selectedTask.amount > 0" class="detail-row">
             <span class="detail-label">交易金额</span>
             <span class="detail-value amount">¥{{ selectedTask.amount.toLocaleString() }}</span>
@@ -243,6 +253,7 @@ import Toast from '../components/Toast.vue'
 import { logger } from '../utils/api'
 import { authState } from '../utils/auth'
 import { taskStore } from '../utils/taskStore'
+import { shopStore } from '../utils/shopStore'
 
 export default {
   name: 'Tasks',
@@ -280,7 +291,7 @@ export default {
       return this.allTasks.filter(task => task.status !== 'completed' && task.status !== 'cancelled')
     },
     completedTasks() {
-      return this.allTasks.filter(task => task.status === 'completed')
+      return this.allTasks.filter(task => task.status === 'completed' || task.status === 'cancelled')
     },
     pendingCount() {
       return this.pendingTasks.length
@@ -376,6 +387,15 @@ export default {
     },
     async confirmPay() {
       if (!this.selectedTask) return
+      // 商城订单的付款必须跳转到商城恢复原订单，保证库存与金额一致、不重复下单
+      if (this.selectedTask.type === 'order') {
+        this.showPayModal = false
+        const orderNo = this.selectedTask.extra?.orderNo
+        if (orderNo) {
+          this.$router.push({ path: '/shop', query: { orderNo } })
+        }
+        return
+      }
       this.payLoading = true
       
       await new Promise(resolve => setTimeout(resolve, 1000))
@@ -398,18 +418,26 @@ export default {
     async confirmCancel() {
       if (!this.selectedTask) return
       this.cancelLoading = true
-      
-      await new Promise(resolve => setTimeout(resolve, 800))
-      
-      const result = taskStore.remove(this.selectedTask.id)
-      
+
+      await new Promise(resolve => setTimeout(resolve, 600))
+
+      const task = this.selectedTask
+      let result
+      // 商城订单取消需与商城订单状态、库存联动，且不产生重复记录
+      if (task.type === 'order' && task.extra?.orderNo) {
+        const shopResult = shopStore.cancelOrder(task.extra.orderNo)
+        result = !!shopResult.ok
+      } else {
+        result = taskStore.remove(task.id)
+      }
+
       this.cancelLoading = false
       this.showCancelModal = false
-      
+
       if (result) {
         this.refreshTasks()
         this.showNotification('success', '取消成功', '任务已取消')
-        logger.info('Task cancelled', { taskId: this.selectedTask.id })
+        logger.info('Task cancelled', { taskId: task.id })
       } else {
         this.showNotification('error', '取消失败', '请稍后重试')
       }
@@ -899,6 +927,37 @@ export default {
 .detail-value.amount {
   color: var(--primary);
   font-weight: 600;
+}
+
+.detail-orders {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.detail-order-items {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.detail-order-item {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  background: rgba(255, 255, 255, 0.04);
+  border-radius: 8px;
+  padding: 0.5rem 0.75rem;
+  font-size: 0.85rem;
+}
+
+.detail-order-item .doi-name {
+  flex: 1;
+  color: var(--text-secondary);
+}
+
+.detail-order-item .doi-qty {
+  color: var(--text-muted);
 }
 
 @media (max-width: 768px) {

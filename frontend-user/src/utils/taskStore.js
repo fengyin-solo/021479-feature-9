@@ -318,18 +318,67 @@ export const taskStore = {
   },
 
   addOrderTask(order) {
-    return this.add({
+    return this.upsertOrderTask(order)
+  },
+
+  /**
+   * 按订单号幂等写入商城订单任务
+   * 同一 orderNo 重复调用只更新内容（状态 / 金额 / 商品），绝不产生重复任务
+   * @param {Object} order 商城订单（shopStore 中的订单对象）
+   */
+  upsertOrderTask(order) {
+    const tasks = loadTasks()
+    const index = tasks.findIndex(
+      t => t.type === 'order' && t.extra && t.extra.orderNo === order.orderNo
+    )
+    const status = order.status === 'paid'
+      ? 'pending_shipment'
+      : order.status === 'cancelled'
+        ? 'cancelled'
+        : 'pending_payment'
+    const subtitleMap = {
+      pending_payment: '等待付款',
+      pending_shipment: '支付成功，待发货',
+      cancelled: '订单已取消'
+    }
+    const taskData = {
       type: 'order',
       title: order.items.map(i => i.name).join('、'),
-      subtitle: '已下单，待发货',
+      subtitle: subtitleMap[status],
       amount: order.amount,
-      status: 'pending_shipment',
+      status,
       extra: {
         orderNo: order.orderNo,
         items: order.items,
         createTime: order.createTime
       }
-    })
+    }
+
+    if (index !== -1) {
+      tasks[index] = { ...tasks[index], ...taskData }
+      saveTasks(tasks)
+      logger.info('订单任务已更新', { orderNo: order.orderNo, status })
+      return enrichTask(tasks[index])
+    }
+
+    const newTask = {
+      id: generateTaskId(),
+      createdAt: formatDate(new Date()),
+      ...taskData
+    }
+    tasks.unshift(newTask)
+    saveTasks(tasks)
+    logger.info('订单任务已添加', { orderNo: order.orderNo, status })
+    return enrichTask(newTask)
+  },
+
+  /**
+   * 按订单号查询任务
+   */
+  getByOrderNo(orderNo) {
+    const tasks = loadTasks()
+    const task = tasks.find(t => t.type === 'order' && t.extra && t.extra.orderNo === orderNo)
+    return task ? enrichTask(task) : null
   },
 
   markAsPaid(taskId) {
