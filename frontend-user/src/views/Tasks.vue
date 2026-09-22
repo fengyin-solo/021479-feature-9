@@ -145,7 +145,7 @@
       <div class="pay-info">
         <div class="pay-item">
           <span class="pay-label">订单编号</span>
-          <span class="pay-value">{{ selectedTask?.id }}</span>
+          <span class="pay-value">{{ selectedTask?.type === 'order' ? (selectedTask?.extra?.orderNo || selectedTask?.id) : selectedTask?.id }}</span>
         </div>
         <div class="pay-item">
           <span class="pay-label">项目名称</span>
@@ -195,6 +195,18 @@
           <div class="detail-row">
             <span class="detail-label">任务编号</span>
             <span class="detail-value">{{ selectedTask.id }}</span>
+          </div>
+          <div v-if="selectedTask.type === 'order' && selectedTask.extra?.orderNo" class="detail-row">
+            <span class="detail-label">订单编号</span>
+            <span class="detail-value">{{ selectedTask.extra.orderNo }}</span>
+          </div>
+          <div v-if="selectedTask.type === 'order' && selectedTask.extra?.items?.length" class="detail-row detail-items-row">
+            <span class="detail-label">商品明细</span>
+            <span class="detail-value">
+              <span v-for="item in selectedTask.extra.items" :key="item.id" class="detail-goods">
+                {{ item.icon }} {{ item.name }} ×{{ item.qty }}
+              </span>
+            </span>
           </div>
           <div class="detail-row">
             <span class="detail-label">任务类型</span>
@@ -280,7 +292,8 @@ export default {
       return this.allTasks.filter(task => task.status !== 'completed' && task.status !== 'cancelled')
     },
     completedTasks() {
-      return this.allTasks.filter(task => task.status === 'completed')
+      // 已取消的任务归入「已完成」页签保留记录
+      return this.allTasks.filter(task => task.status === 'completed' || task.status === 'cancelled')
     },
     pendingCount() {
       return this.pendingTasks.length
@@ -325,19 +338,27 @@ export default {
     },
     handleAction(task, action) {
       this.selectedTask = { ...task }
-      
+
+      // 商城订单的付款 / 再次购买跳转回商城，由商城统一保证
+      // 库存校验、金额校验与订单幂等（不产生重复订单）
+      if (task.type === 'order' && (action.key === 'pay' || action.key === 'view' || action.key === 'rebuy')) {
+        const query = { orderNo: task.extra?.orderNo }
+        if (action.key === 'rebuy') query.action = 'rebuy'
+        this.$router.push({ path: '/shop', query })
+        return
+      }
+
       if (action.route) {
         this.navigateToRoute(action.route, action.key, task)
         return
       }
-      
+
       const actionMap = {
         pay: () => this.openPayModal(),
         cancel: () => this.openCancelModal(),
         view: () => this.openDetailModal(),
         remind: () => this.handleRemind(),
         rebook: () => this.navigateToRoute('/tables', 'rebook', task),
-        rebuy: () => this.navigateToRoute('/shop', 'rebuy', task),
         confirm: () => this.handleConfirm(),
         review: () => this.handleReview()
       }
@@ -398,17 +419,18 @@ export default {
     async confirmCancel() {
       if (!this.selectedTask) return
       this.cancelLoading = true
-      
+
       await new Promise(resolve => setTimeout(resolve, 800))
-      
-      const result = taskStore.remove(this.selectedTask.id)
-      
+
+      // 取消仅做状态变更并保留记录，幂等执行，不产生新订单 / 新任务
+      const result = taskStore.cancelTask(this.selectedTask.id)
+
       this.cancelLoading = false
       this.showCancelModal = false
-      
+
       if (result) {
         this.refreshTasks()
-        this.showNotification('success', '取消成功', '任务已取消')
+        this.showNotification('success', '取消成功', '记录已保留，未生成重复订单')
         logger.info('Task cancelled', { taskId: this.selectedTask.id })
       } else {
         this.showNotification('error', '取消失败', '请稍后重试')
@@ -642,6 +664,11 @@ export default {
   opacity: 0.9;
 }
 
+.task-card.danger {
+  border-left: 4px solid #ff6b6b;
+  opacity: 0.85;
+}
+
 .task-header {
   display: flex;
   justify-content: space-between;
@@ -689,6 +716,11 @@ export default {
 .task-status.success {
   background: rgba(108, 117, 125, 0.15);
   color: #6c757d;
+}
+
+.task-status.danger {
+  background: rgba(255, 107, 107, 0.15);
+  color: #ff6b6b;
 }
 
 .task-body {
@@ -890,6 +922,11 @@ export default {
   color: #6c757d;
 }
 
+.detail-status.danger {
+  background: rgba(255, 107, 107, 0.15);
+  color: #ff6b6b;
+}
+
 .detail-list {
   display: flex;
   flex-direction: column;
@@ -899,6 +936,17 @@ export default {
 .detail-value.amount {
   color: var(--primary);
   font-weight: 600;
+}
+
+.detail-items-row {
+  align-items: flex-start;
+}
+
+.detail-goods {
+  display: block;
+  text-align: right;
+  color: var(--text-secondary);
+  margin-bottom: 0.2rem;
 }
 
 @media (max-width: 768px) {

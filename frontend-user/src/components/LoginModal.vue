@@ -78,7 +78,7 @@ import { logger } from '../utils/api'
 export default {
   name: 'LoginModal',
   props: { modelValue: Boolean },
-  emits: ['update:modelValue', 'success'],
+  emits: ['update:modelValue', 'success', 'login-success'],
   data() {
     return { username: '', password: '', showPassword: false, loading: false, error: null }
   },
@@ -102,6 +102,7 @@ export default {
         if (result.success) {
           logger.info('Login successful')
           this.$emit('success', result.user)
+          this.$emit('login-success', result.user)
           this.close()
           this.username = ''
           this.password = ''
